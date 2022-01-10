@@ -1,0 +1,42 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: node-3tier-app2-api
+  labels:
+    app: node-3tier-app2-api
+spec:
+  gateways:
+  - node-3tier-app2-api
+  hosts:
+  - node-3tier-app2-api.local
+  - acme.com
+  http:
+  - name: primary
+    route:
+    - destination:
+        host: node-3tier-app2-api
+        port:
+          number: 8080
+      weight: 100
+    - destination:
+        host: node-3tier-app2-api-canary
+        port:
+          number: 8080
+      weight: 0
+
+---
+
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: node-3tier-app2-api
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 8080
+      name: http
+      protocol: HTTP
+    hosts:
+     - "*"

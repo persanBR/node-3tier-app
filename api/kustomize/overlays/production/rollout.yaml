@@ -1,0 +1,159 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: node-3tier-app2-api
+  labels:
+    app: node-3tier-app2-api
+spec:
+  selector:
+    matchLabels:
+      app: node-3tier-app2-api
+  template:
+    metadata:
+      labels:
+        app: node-3tier-app2-api
+        istio-injection: enabled
+    spec:
+      containers:
+      - name: node-3tier-app2-api
+        image: gbulanov/node-3tier-app2-api
+        ports:
+        - containerPort: 8080
+        env:
+          - name: PORT
+            value: "8080"
+          - name: DB
+            valueFrom:
+              secretKeyRef:
+                name: db
+                key: database
+          - name: DBUSER
+            valueFrom:
+              secretKeyRef:
+                name: db
+                key: username
+          - name: DBPASS
+            valueFrom:
+              secretKeyRef:
+                name: db
+                key: password
+          - name: DBHOST
+            value: localhost #SQL-agent from sidecar
+          - name: DBPORT
+            value: "5432"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: 100m
+            memory: 256Mi
+          requests:
+            cpu: 80m
+            memory: 128Mi
+  strategy:
+    canary:
+      canaryService: node-3tier-app2-api-canary
+      stableService: node-3tier-app2-api
+      trafficRouting:
+        istio:
+          virtualService:
+            name: node-3tier-app2-api
+            routes:
+            - primary
+      steps:
+      - setWeight: 10
+      - pause: {duration: 2m}
+      - setWeight: 30
+      - pause: {duration: 30s}
+      - setWeight: 50
+      - pause: {duration: 30s}
+      analysis:
+        templates:
+        - templateName: node-3tier-app2-api
+        startingStep: 2
+        args:
+        - name: service-name
+          value: "node-3tier-app2-api-canary.production.svc.cluster.local"
+
+---
+
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: node-3tier-app2-api
+spec:
+  args:
+  - name: service-name
+  metrics:
+  - name: success-rate
+    interval: 10s
+    successCondition: result[0] >= 0.8
+    failureCondition: result[0] < 0.8
+    failureLimit: 3
+    provider:
+      prometheus:
+        address: http://prometheus-server.monitoring
+        query: |
+          sum(irate(
+            istio_requests_total{  
+              reporter="source",
+              destination_service=~"{{args.service-name}}",
+              response_code=~"2.*"
+            }[2m]
+          )) / sum(irate(
+            istio_requests_total{
+              reporter="source",
+              destination_service=~"{{args.service-name}}"
+            }[2m]
+          ))
+  - name: avg-req-duration
+    interval: 10s
+    successCondition: result[0] <= 1000
+    failureCondition: result[0] > 1000
+    failureLimit: 3
+    provider:
+      prometheus:
+        address: http://prometheus-server.monitoring
+        query: |
+          sum(irate(
+            istio_request_duration_milliseconds_sum{
+              reporter="source",
+              destination_service=~"{{args.service-name}}"
+            }[2m]
+          )) / sum(irate(
+            istio_request_duration_milliseconds_count{
+              reporter="source",
+              destination_service=~"{{args.service-name}}"
+            }[2m]
+          ))
+      
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-3tier-app2-api-canary
+  labels:
+    app: node-3tier-app2-api
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: node-3tier-app2-api

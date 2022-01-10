@@ -1,0 +1,42 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: node-3tier-app2-web
+  labels:
+    app: node-3tier-app2-web
+spec:
+  gateways:
+  - node-3tier-app2-web
+  hosts:
+  - node-3tier-app2-web.local
+  - a2fba447a6ed946f5be6cc59bf7c3676-1036994651.eu-west-2.elb.amazonaws.com
+  http:
+  - name: primary
+    route:
+    - destination:
+        host: node-3tier-app2-web
+        port:
+          number: 8080
+      weight: 100
+    - destination:
+        host: node-3tier-app2-web-canary
+        port:
+          number: 8080
+      weight: 0
+
+---
+
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: node-3tier-app2-web
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+     - "*"
